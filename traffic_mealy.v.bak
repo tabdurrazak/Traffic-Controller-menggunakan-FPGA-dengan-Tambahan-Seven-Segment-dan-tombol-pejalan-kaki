@@ -1,0 +1,127 @@
+module traffic_mealy #(
+    parameter integer CLK_HZ = 50_000_000,
+    parameter integer T_GREEN = 5,   // detik
+    parameter integer T_YELLOW = 2,
+    parameter integer T_RED = 5
+)(
+    input  wire clk,
+    input  wire rst_n,
+
+    output reg  led_r,
+    output reg  led_y,
+    output reg  led_g,
+
+    output wire [6:0] seg,   // a..g (aktif-low/aktif-high tergantung board, untuk sim bebas)
+    output wire [3:0] an     // optional, untuk 1 digit: pakai an[0] saja
+);
+
+    // ---------------------------
+    // Timer 1 detik (tick_1s)
+    // ---------------------------
+    reg [31:0] div_cnt;
+    reg tick_1s;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            div_cnt <= 0;
+            tick_1s <= 1'b0;
+        end else begin
+            if (div_cnt == (CLK_HZ-1)) begin
+                div_cnt <= 0;
+                tick_1s <= 1'b1;
+            end else begin
+                div_cnt <= div_cnt + 1;
+                tick_1s <= 1'b0;
+            end
+        end
+    end
+
+    // ---------------------------
+    // Countdown timer (seconds_left)
+    // - dipakai sebagai "input" Mealy: timer_done
+    // ---------------------------
+    reg [7:0] seconds_left;
+    wire timer_done = (seconds_left == 0);
+
+    // state encoding
+    localparam S_GREEN  = 2'd0;
+    localparam S_YELLOW = 2'd1;
+    localparam S_RED    = 2'd2;
+
+    reg [1:0] state, next_state;
+
+    // durasi per state
+    function [7:0] duration_for_state(input [1:0] st);
+        begin
+            case (st)
+                S_GREEN:  duration_for_state = T_GREEN[7:0];
+                S_YELLOW: duration_for_state = T_YELLOW[7:0];
+                S_RED:    duration_for_state = T_RED[7:0];
+                default:  duration_for_state = T_RED[7:0];
+            endcase
+        end
+    endfunction
+
+    // ---------------------------
+    // FSM Mealy:
+    // - next_state tergantung state + timer_done (input)
+    // - output bisa dibuat Mealy juga, tapi di sini output utama berbasis state (lebih stabil)
+    //   dan transisi ditentukan oleh timer_done => sudah valid sebagai Mealy.
+    // ---------------------------
+    always @(*) begin
+        next_state = state;
+        case (state)
+            S_GREEN:  if (timer_done) next_state = S_YELLOW;
+            S_YELLOW: if (timer_done) next_state = S_RED;
+            S_RED:    if (timer_done) next_state = S_GREEN;
+            default:  next_state = S_RED;
+        endcase
+    end
+
+    // state register + timer update
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            state <= S_RED;
+            seconds_left <= duration_for_state(S_RED);
+        end else begin
+            // kalau pindah state, reload timer
+            if (state != next_state) begin
+                state <= next_state;
+                seconds_left <= duration_for_state(next_state);
+            end else begin
+                // countdown tiap 1 detik
+                if (tick_1s) begin
+                    if (seconds_left != 0)
+                        seconds_left <= seconds_left - 1;
+                end
+            end
+        end
+    end
+
+    // output LED (state-based, stabil)
+    always @(*) begin
+        led_r = 1'b0;
+        led_y = 1'b0;
+        led_g = 1'b0;
+
+        case (state)
+            S_GREEN:  led_g = 1'b1;
+            S_YELLOW: led_y = 1'b1;
+            S_RED:    led_r = 1'b1;
+            default:  led_r = 1'b1;
+        endcase
+    end
+
+    // ---------------------------
+    // 7-seg: tampilkan seconds_left (1 digit terakhir)
+    // ---------------------------
+    wire [3:0] digit = seconds_left % 10;
+    sevenseg_1digit u7 (
+        .bin(digit),
+        .seg(seg)
+    );
+
+    // aktifkan 1 digit saja (untuk sim)
+    assign an = 4'b1110; // kalau common-anode/cathode beda, ini tidak penting untuk sim
+
+endmodule

@@ -1,0 +1,48 @@
+`timescale 1ns/1ps
+
+module tb_traffic_mealy;
+
+    // bikin clock lebih cepat agar simulasi tidak lama:
+    // set CLK_HZ kecil via parameter
+    reg clk;
+    reg rst_n;
+
+    wire led_r, led_y, led_g;
+    wire [6:0] seg;
+    wire [3:0] an;
+
+    // “Clock” sim: 10ns period => 100MHz virtual
+    initial clk = 0;
+    always #5 clk = ~clk;
+
+    // Instansiasi DUT:
+    // - CLK_HZ diset 20 supaya "1 detik" = 20 clock => sim cepat
+    // - Durasi fase singkat
+    traffic_mealy #(
+        .CLK_HZ(20),
+        .T_GREEN(3),
+        .T_YELLOW(2),
+        .T_RED(3)
+    ) dut (
+        .clk(clk),
+        .rst_n(rst_n),
+        .led_r(led_r),
+        .led_y(led_y),
+        .led_g(led_g),
+        .seg(seg),
+        .an(an)
+    );
+
+    initial begin
+        // reset
+        rst_n = 0;
+        #50;
+        rst_n = 1;
+
+        // jalanin simulasi cukup lama untuk lihat beberapa siklus
+        #5000;
+
+        $stop;
+    end
+
+endmodule
